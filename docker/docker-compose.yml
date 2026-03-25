@@ -1,5 +1,17 @@
 services:
 
+  postgres:
+    image: postgres:13
+    container_name: airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
   spark:
     image: apache/spark:3.5.0
     container_name: spark
@@ -10,18 +22,21 @@ services:
   airflow:
     image: apache/airflow:2.8.3
     container_name: airflow
+    depends_on:
+      - postgres
     ports:
       - "8080:8080"
     environment:
-      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/airflow.
-      _AIRFLOW_WWW_USER_USERNAME: airflow
-      _AIRFLOW_WWW_USER_PASSWORD: airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      _AIRFLOW_WWW_USER_USERNAME: genclays
+      _AIRFLOW_WWW_USER_PASSWORD: admin
       _AIRFLOW_WWW_USER_ROLE: Admin
       _AIRFLOW_WWW_USER_EMAIL: mohammed.genclays@gmail.com
-
     volumes:
-      - ../airflow:/opt/airflow/dags
+      - ../airflow/dags:/opt/airflow/dags
+      - /var/run/docker.sock:/var/run/docker.sock
     command: standalone
 
   ui:
@@ -33,3 +48,6 @@ services:
     command: bash -c "pip install streamlit && streamlit run app.py"
     ports:
       - "8501:8501"
+
+volumes:
+  postgres-db-volume:

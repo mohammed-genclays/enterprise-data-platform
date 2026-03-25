@@ -45,8 +45,12 @@ df_clean.show()
 # -----------------------------------
 spark.sql("CREATE DATABASE IF NOT EXISTS staging")
 
+
+# Drop table if exists (important for re-runs)
+spark.sql("DROP TABLE IF EXISTS staging.employee")
+
+
 df_clean.write \
-    .mode("overwrite") \
     .format("parquet") \
     .saveAsTable("staging.employee")
 

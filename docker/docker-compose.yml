@@ -44,8 +44,13 @@ services:
     container_name: ui
     volumes:
       - ../ui:/ui
+      - ../config:/app/config
     working_dir: /ui
-    command: bash -c "pip install streamlit && streamlit run app.py"
+    command: >
+      bash -c "
+      pip install streamlit pyyaml &&
+      streamlit run app.py
+      "
     ports:
       - "8501:8501"
 

@@ -19,4 +19,9 @@ with DAG(
         bash_command="docker exec spark /opt/spark/bin/spark-submit /app/spark/scd.py"
     )
 
-    spark_transform >> spark_scd
+    spark_warehouse = BashOperator(
+        task_id="spark_warehouse_views",
+        bash_command="docker exec spark /opt/spark/bin/spark-submit /app/spark/warehouse_views.py"
+    )
+
+    spark_transform >> spark_scd >> spark_warehouse

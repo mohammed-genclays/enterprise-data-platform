@@ -1,5 +1,9 @@
 from pyspark.sql import SparkSession
+import yaml
 
+# -----------------------------------
+# Spark session
+# -----------------------------------
 spark = SparkSession.builder \
     .appName("WarehouseViews") \
     .config("spark.sql.warehouse.dir", "/app/spark-warehouse") \
@@ -7,37 +11,50 @@ spark = SparkSession.builder \
     .getOrCreate()
 
 # -----------------------------------
+# Load metadata
+# -----------------------------------
+with open("/app/config/pipelines.yaml") as f:
+    config = yaml.safe_load(f)
+
+# -----------------------------------
 # Create warehouse database
 # -----------------------------------
 spark.sql("CREATE DATABASE IF NOT EXISTS warehouse")
 
 # -----------------------------------
-# Drop existing view (safe re-runs)
+# Create warehouse views per pipeline
 # -----------------------------------
-spark.sql("DROP VIEW IF EXISTS warehouse.employee_vw")
+for pipeline in config["pipelines"]:
 
-# -----------------------------------
-# Create secure warehouse view
-# IMPORTANT: reference ONLY persistent tables
-# -----------------------------------
-spark.sql("""
-    CREATE VIEW warehouse.employee_vw AS
-    SELECT
-        id,
+    pipeline_name = pipeline["pipeline_name"]
+    target_table = pipeline["target_table"]
 
-        -- Mask PII
-        '****' AS name_masked,
+    view_name = f"warehouse.{pipeline_name}_vw"
 
-        department,
+    print(f"=== Creating warehouse view: {view_name} ===")
 
-        -- Hash sensitive data
-        sha2(CAST(salary AS STRING), 256) AS salary_hash,
+    # Drop existing view (safe re-runs)
+    spark.sql(f"DROP VIEW IF EXISTS {view_name}")
 
-        start_date
-    FROM target.employee_dim
-    WHERE is_current = true
-""")
+    # Create secure warehouse view
+    spark.sql(f"""
+        CREATE VIEW {view_name} AS
+        SELECT
+            id,
 
-print("✅ Warehouse secure view created: warehouse.employee_vw")
+            -- Mask PII
+            '****' AS name_masked,
+
+            department,
+
+            -- Hash sensitive columns
+            sha2(CAST(salary AS STRING), 256) AS salary_hash,
+
+            start_date
+        FROM {target_table}
+        WHERE is_current = true
+    """)
+
+    print(f"✅ Warehouse secure view created: {view_name}")
 
 spark.stop()

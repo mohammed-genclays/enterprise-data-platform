@@ -1,6 +1,9 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, trim, initcap, when
 from pyspark.sql.types import IntegerType
+import yaml
+import os
+import shutil
 
 # -----------------------------------
 # Spark session with warehouse support
@@ -12,66 +15,81 @@ spark = SparkSession.builder \
     .getOrCreate()
 
 # -----------------------------------
-# Read raw data
+# Load metadata
 # -----------------------------------
-df = spark.read.option("header", True).csv("/app/data/employee.csv")
-
-print("=== RAW DATA ===")
-df.show()
+with open("/app/config/pipelines.yaml") as f:
+    config = yaml.safe_load(f)
 
 # -----------------------------------
-# Transformations
+# Process each pipeline
 # -----------------------------------
-df_clean = df.withColumn(
-    "name", initcap(trim(col("name")))
-)
+for pipeline in config["pipelines"]:
 
-df_clean = df_clean.withColumn(
-    "salary",
-    when(col("salary").isNull(), 0).otherwise(col("salary")).cast(IntegerType())
-)
+    print(f"=== Processing pipeline: {pipeline['pipeline_name']} ===")
 
-df_clean = df_clean.withColumn(
-    "id", col("id").cast(IntegerType())
-)
+    source_path = pipeline["source"]["path"]
+    staging_table = pipeline["staging_table"]
 
-df_clean = df_clean.filter(col("id").isNotNull())
+    # -----------------------------------
+    # Read raw data
+    # -----------------------------------
+    df = spark.read.option("header", True).csv(source_path)
 
-print("=== CLEAN DATA ===")
-df_clean.show()
+    print("=== RAW DATA ===")
+    df.show()
 
-# -----------------------------------
-# Create STAGING database & table
-# -----------------------------------
+    # -----------------------------------
+    # Transformations (YOUR ORIGINAL LOGIC)
+    # -----------------------------------
+    df_clean = df.withColumn(
+        "name", initcap(trim(col("name")))
+    )
 
-spark.sql("CREATE DATABASE IF NOT EXISTS staging")
+    df_clean = df_clean.withColumn(
+        "salary",
+        when(col("salary").isNull(), 0)
+        .otherwise(col("salary"))
+        .cast(IntegerType())
+    )
 
-# Drop table metadata
-spark.sql("DROP TABLE IF EXISTS staging.employee")
+    df_clean = df_clean.withColumn(
+        "id", col("id").cast(IntegerType())
+    )
 
-# Remove physical location if it exists (VERY IMPORTANT)
-import shutil
-import os
+    df_clean = df_clean.filter(col("id").isNotNull())
 
-table_path = "/app/spark-warehouse/staging.db/employee"
-if os.path.exists(table_path):
-    shutil.rmtree(table_path)
+    print("=== CLEAN DATA ===")
+    df_clean.show()
 
-# Recreate managed table
-df_clean.write \
-    .mode("overwrite") \
-    .format("parquet") \
-    .saveAsTable("staging.employee")
+    # -----------------------------------
+    # Create STAGING database
+    # -----------------------------------
+    spark.sql("CREATE DATABASE IF NOT EXISTS staging")
 
+    # -----------------------------------
+    # Idempotent staging write
+    # -----------------------------------
+    spark.sql(f"DROP TABLE IF EXISTS {staging_table}")
 
-print("=== DATA WRITTEN TO STAGING TABLE ===")
+    table_name = staging_table.split(".")[1]
+    table_path = f"/app/spark-warehouse/staging.db/{table_name}"
 
-# -----------------------------------
-# Read back from staging (validation)
-# -----------------------------------
-df_stage = spark.sql("SELECT * FROM staging.employee")
+    if os.path.exists(table_path):
+        shutil.rmtree(table_path)
 
-print("=== STAGING TABLE DATA ===")
-df_stage.show()
+    df_clean.write \
+        .mode("overwrite") \
+        .format("parquet") \
+        .saveAsTable(staging_table)
+
+    print(f"=== DATA WRITTEN TO {staging_table} ===")
+
+    # -----------------------------------
+    # Read-back validation
+    # -----------------------------------
+    df_stage = spark.sql(f"SELECT * FROM {staging_table}")
+
+    print("=== STAGING TABLE DATA ===")
+    df_stage.show()
 
 spark.stop()

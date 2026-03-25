@@ -3,6 +3,7 @@ from pyspark.sql.functions import col, lit, current_date, sha2, concat_ws
 from pyspark.sql.types import DateType
 import os
 import shutil
+import yaml
 
 # -----------------------------------
 # Spark session
@@ -14,73 +15,103 @@ spark = SparkSession.builder \
     .getOrCreate()
 
 # -----------------------------------
-# Read staging data
+# Load metadata
 # -----------------------------------
-df_stage = spark.sql("SELECT * FROM staging.employee")
-
-# Hash for change detection
-df_stage = df_stage.withColumn(
-    "hash",
-    sha2(concat_ws("||", col("name"), col("department"), col("salary")), 256)
-)
+with open("/app/config/pipelines.yaml") as f:
+    config = yaml.safe_load(f)
 
 # -----------------------------------
 # Create target database
 # -----------------------------------
 spark.sql("CREATE DATABASE IF NOT EXISTS target")
 
-TARGET_PATH = "/app/spark-warehouse/target.db/employee_dim"
-
 # -----------------------------------
-# SCD TYPE 1 (Overwrite)
+# Process each pipeline
 # -----------------------------------
-def scd_type_1():
-    spark.sql("DROP TABLE IF EXISTS target.employee_dim")
+for pipeline in config["pipelines"]:
 
-    if os.path.exists(TARGET_PATH):
-        shutil.rmtree(TARGET_PATH)
+    staging_table = pipeline["staging_table"]
+    target_table = pipeline["target_table"]
+    scd_type = pipeline.get("scd_type", 2)
 
-    df_stage.write \
-        .mode("overwrite") \
-        .format("parquet") \
-        .saveAsTable("target.employee_dim")
+    target_db, target_tbl = target_table.split(".")
+    target_path = f"/app/spark-warehouse/{target_db}.db/{target_tbl}"
 
-# -----------------------------------
-# SCD TYPE 2 (History)
-# -----------------------------------
-def scd_type_2():
-    # Clean metadata + physical location (VERY IMPORTANT)
-    spark.sql("DROP TABLE IF EXISTS target.employee_dim")
+    print(f"=== Processing SCD for {target_table} (Type {scd_type}) ===")
 
-    if os.path.exists(TARGET_PATH):
-        shutil.rmtree(TARGET_PATH)
+    # -----------------------------------
+    # Read staging data
+    # -----------------------------------
+    df_stage = spark.sql(f"SELECT * FROM {staging_table}")
 
-    # Create empty target table
-    spark.sql("""
-        CREATE TABLE target.employee_dim (
-            id INT,
-            name STRING,
-            department STRING,
-            salary INT,
-            start_date DATE,
-            end_date DATE,
-            is_current BOOLEAN,
-            hash STRING
+    # Hash for change detection
+    df_stage = df_stage.withColumn(
+        "hash",
+        sha2(
+            concat_ws("||",
+                col("name"),
+                col("department"),
+                col("salary").cast("string")
+            ),
+            256
         )
-        USING PARQUET
-    """)
+    )
 
-    # Prepare new records
-    df_new = df_stage.withColumn("start_date", current_date()) \
-        .withColumn("end_date", lit(None).cast(DateType())) \
-        .withColumn("is_current", lit(True))
+    # -----------------------------------
+    # SCD TYPE 1 (Overwrite)
+    # -----------------------------------
+    if scd_type == 1:
 
-    # First load (table is empty)
-    df_new.write.mode("append").saveAsTable("target.employee_dim")
+        spark.sql(f"DROP TABLE IF EXISTS {target_table}")
 
-# -----------------------------------
-# Execute SCD Type 2 (default)
-# -----------------------------------
-scd_type_2()
+        if os.path.exists(target_path):
+            shutil.rmtree(target_path)
+
+        df_stage.write \
+            .mode("overwrite") \
+            .format("parquet") \
+            .saveAsTable(target_table)
+
+        print(f"✅ SCD Type 1 load completed for {target_table}")
+
+    # -----------------------------------
+    # SCD TYPE 2 (History)
+    # -----------------------------------
+    elif scd_type == 2:
+
+        # Clean metadata + physical storage (IDEMPOTENT)
+        spark.sql(f"DROP TABLE IF EXISTS {target_table}")
+
+        if os.path.exists(target_path):
+            shutil.rmtree(target_path)
+
+        # Create empty target table
+        spark.sql(f"""
+            CREATE TABLE {target_table} (
+                id INT,
+                name STRING,
+                department STRING,
+                salary INT,
+                start_date DATE,
+                end_date DATE,
+                is_current BOOLEAN,
+                hash STRING
+            )
+            USING PARQUET
+        """)
+
+        # Prepare new records
+        df_new = df_stage \
+            .withColumn("start_date", current_date()) \
+            .withColumn("end_date", lit(None).cast(DateType())) \
+            .withColumn("is_current", lit(True))
+
+        # First load
+        df_new.write.mode("append").saveAsTable(target_table)
+
+        print(f"✅ SCD Type 2 load completed for {target_table}")
+
+    else:
+        raise Exception(f"Unsupported SCD type: {scd_type}")
 
 spark.stop()

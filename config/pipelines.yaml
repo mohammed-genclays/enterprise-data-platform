@@ -1,0 +1,12 @@
+pipelines:
+  - pipeline_name: employee_pipeline
+    source:
+      file_type: csv
+      path: /app/data/employee.csv
+    staging_table: staging.employee
+    target_table: target.employee_dim
+    scd_type: 2
+    pii_columns:
+      - name
+    sensitive_columns:
+      - salary

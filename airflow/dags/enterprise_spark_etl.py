@@ -9,19 +9,19 @@ with DAG(
     catchup=False
 ) as dag:
 
-    spark_transform = BashOperator(
+    transform = BashOperator(
         task_id="spark_transform",
         bash_command="docker exec spark /opt/spark/bin/spark-submit /app/spark/transforms.py"
     )
 
-    spark_scd = BashOperator(
+    scd = BashOperator(
         task_id="spark_scd",
         bash_command="docker exec spark /opt/spark/bin/spark-submit /app/spark/scd.py"
     )
 
-    spark_warehouse = BashOperator(
-        task_id="spark_warehouse_views",
+    warehouse = BashOperator(
+        task_id="spark_warehouse",
         bash_command="docker exec spark /opt/spark/bin/spark-submit /app/spark/warehouse_views.py"
     )
 
-    spark_transform >> spark_scd >> spark_warehouse
+    transform >> scd >> warehouse

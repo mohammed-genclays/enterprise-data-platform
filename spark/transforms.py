@@ -43,16 +43,26 @@ df_clean.show()
 # -----------------------------------
 # Create STAGING database & table
 # -----------------------------------
+
 spark.sql("CREATE DATABASE IF NOT EXISTS staging")
 
-
-# Drop table if exists (important for re-runs)
+# Drop table metadata
 spark.sql("DROP TABLE IF EXISTS staging.employee")
 
+# Remove physical location if it exists (VERY IMPORTANT)
+import shutil
+import os
 
+table_path = "/app/spark-warehouse/staging.db/employee"
+if os.path.exists(table_path):
+    shutil.rmtree(table_path)
+
+# Recreate managed table
 df_clean.write \
+    .mode("overwrite") \
     .format("parquet") \
     .saveAsTable("staging.employee")
+
 
 print("=== DATA WRITTEN TO STAGING TABLE ===")
 

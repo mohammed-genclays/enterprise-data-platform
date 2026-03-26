@@ -15,11 +15,14 @@ services:
   spark:
     image: apache/spark:3.5.0
     container_name: spark
+    user: root
     volumes:
       - ../:/app
     command: >
       bash -c "
-      pip install pyyaml &&
+      pip install --no-cache-dir pyyaml &&
+      chown -R spark:spark /home/spark &&
+      su spark -c 'sleep infinity'
       sleep infinity
       "  
 

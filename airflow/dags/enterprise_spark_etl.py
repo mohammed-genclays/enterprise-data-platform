@@ -26,11 +26,7 @@ with DAG(
 
     export_dashboard_data = BashOperator(
         task_id="export_dashboard_data",
-        bash_command="""
-        docker exec spark /opt/spark/bin/spark-sql -e "
-        SELECT * FROM warehouse.employee_pipeline_vw
-        " > /app/data/dashboard_employee_pipeline.csv
-        """
+        bash_command="docker exec spark /opt/spark/bin/spark-submit /app/spark/export_dashboard.py"
     )
 
     spark_transform >> spark_scd >> spark_warehouse >> export_dashboard_data

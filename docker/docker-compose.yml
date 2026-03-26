@@ -21,7 +21,6 @@ services:
     command: >
       bash -c "
       pip install --no-cache-dir pyyaml &&
-      chown -R spark:spark /home/spark &&
       su spark -c 'sleep infinity'
       sleep infinity
       "  

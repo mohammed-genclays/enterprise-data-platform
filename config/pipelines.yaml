@@ -9,4 +9,11 @@ pipelines:
     pii_columns:
       - name
     sensitive_columns:
-      - salary
+      - salarypipelines:
+- pipeline_name: employee_pipeline
+  scd_type: 2
+  source:
+    file_type: csv
+    path: /app/data/employee.csv
+  staging_table: staging.employee_pipeline
+  target_table: target.employee_pipeline_dim

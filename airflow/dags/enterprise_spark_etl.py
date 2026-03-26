@@ -9,26 +9,28 @@ with DAG(
     catchup=False
 ) as dag:
 
-    transform = BashOperator(
+    spark_transform = BashOperator(
         task_id="spark_transform",
         bash_command="docker exec spark /opt/spark/bin/spark-submit /app/spark/transforms.py"
     )
 
-    scd = BashOperator(
+    spark_scd = BashOperator(
         task_id="spark_scd",
         bash_command="docker exec spark /opt/spark/bin/spark-submit /app/spark/scd.py"
     )
 
-    warehouse = BashOperator(
+    spark_warehouse = BashOperator(
         task_id="spark_warehouse",
         bash_command="docker exec spark /opt/spark/bin/spark-submit /app/spark/warehouse_views.py"
     )
+
     export_dashboard_data = BashOperator(
-    task_id="export_dashboard_data",
-    bash_command="""
-    docker exec spark /opt/spark/bin/spark-sql -e "
-    SELECT * FROM warehouse.employee_pipeline_vw
-    " > /app/data/dashboard_employee_pipeline.csv
-    """
+        task_id="export_dashboard_data",
+        bash_command="""
+        docker exec spark /opt/spark/bin/spark-sql -e "
+        SELECT * FROM warehouse.employee_pipeline_vw
+        " > /app/data/dashboard_employee_pipeline.csv
+        """
     )
+
     spark_transform >> spark_scd >> spark_warehouse >> export_dashboard_data

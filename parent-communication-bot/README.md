@@ -12,8 +12,20 @@ AI Parent Communication Bot automatically:
 ## Project Structure
 - `app.py`: FastAPI service with endpoints for sending summaries and receiving parent queries
 - `bot.py`: summary generation, communication helpers, and simple AI query handling
-- `config.yaml`: placeholder configuration for WhatsApp integration and schedule settings
+- `config.yaml`: configuration for WhatsApp integration and schedule settings
+- `.env.example`: example environment variables for secure credential storage
 - `requirements.txt`: Python dependencies
+
+## Setup WhatsApp Integration (Twilio)
+1. Sign up for a [Twilio account](https://www.twilio.com/).
+2. Enable WhatsApp in your Twilio console and get a WhatsApp-enabled phone number.
+3. Copy `.env.example` to `.env` and fill in your Twilio credentials:
+   ```
+   TWILIO_ACCOUNT_SID=your_account_sid
+   TWILIO_AUTH_TOKEN=your_auth_token
+   TWILIO_FROM_NUMBER=whatsapp:+your_twilio_whatsapp_number
+   ```
+4. Update `config.yaml` with your settings (or rely on env vars).
 
 ## Run locally
 1. Create a virtual environment:
@@ -35,5 +47,6 @@ AI Parent Communication Bot automatically:
    ```
 
 ## Notes
-- Replace the WhatsApp integration placeholder in `bot.py` with a real WhatsApp API provider such as Twilio or Meta Business API.
-- Use environment variables to store sensitive credentials.
+- For production, use environment variables for all secrets.
+- The bot currently uses sample data; integrate with real student/parent databases next.
+- Schedule automated summaries using the cron expression in `config.yaml`.

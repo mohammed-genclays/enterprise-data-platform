@@ -1,7 +1,26 @@
 from datetime import date
 from typing import Dict, List
+import yaml
+import os
+from dotenv import load_dotenv
+from twilio.rest import Client
 
 from pydantic import BaseModel
+
+# Load environment variables
+load_dotenv()
+
+# Load configuration
+with open('config.yaml', 'r') as f:
+    config = yaml.safe_load(f)
+
+# Override with environment variables for security
+config['whatsapp']['account_sid'] = os.getenv('TWILIO_ACCOUNT_SID', config['whatsapp']['account_sid'])
+config['whatsapp']['auth_token'] = os.getenv('TWILIO_AUTH_TOKEN', config['whatsapp']['auth_token'])
+config['whatsapp']['from_number'] = os.getenv('TWILIO_FROM_NUMBER', config['whatsapp']['from_number'])
+
+# Initialize Twilio client
+twilio_client = Client(config['whatsapp']['account_sid'], config['whatsapp']['auth_token'])
 
 
 class StudentPerformance(BaseModel):
@@ -49,7 +68,7 @@ SAMPLE_PERFORMANCES = [
 ]
 
 SAMPLE_PARENTS = [
-    ParentContact(parent_name="Mrs. Sharma", whatsapp_number="whatsapp:+919876543210", student_id="STU001"),
+    ParentContact(parent_name="Mrs. Sharma", whatsapp_number="whatsapp:+917200374549", student_id="STU001"),
     ParentContact(parent_name="Mr. Khan", whatsapp_number="whatsapp:+919123456789", student_id="STU002"),
 ]
 
@@ -67,8 +86,15 @@ def generate_summary(performance: StudentPerformance) -> str:
 
 
 def send_whatsapp_message(to_number: str, message: str) -> None:
-    # TODO: integrate with WhatsApp API provider (Twilio, Meta, etc.)
-    print(f"Sending WhatsApp message to {to_number}:\n{message}\n")
+    try:
+        message = twilio_client.messages.create(
+            body=message,
+            from_=config['whatsapp']['from_number'],
+            to=to_number
+        )
+        print(f"WhatsApp message sent successfully. SID: {message.sid}")
+    except Exception as e:
+        print(f"Failed to send WhatsApp message to {to_number}: {str(e)}")
 
 
 def get_parent_contact(student_id: str) -> ParentContact | None:

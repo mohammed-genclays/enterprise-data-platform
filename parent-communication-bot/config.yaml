@@ -3,6 +3,7 @@ whatsapp:
   account_sid: "YOUR_TWILIO_ACCOUNT_SID"  # Or set TWILIO_ACCOUNT_SID env var
   auth_token: "YOUR_TWILIO_AUTH_TOKEN"    # Or set TWILIO_AUTH_TOKEN env var
   from_number: "whatsapp:+14155238886"   # Or set TWILIO_FROM_NUMBER env var
+  validate_requests: false
 
 schedule:
   weekly_summary_cron: "0 18 * * 5"  # Fridays at 18:00

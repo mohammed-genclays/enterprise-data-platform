@@ -1,0 +1,25 @@
+FROM apache/spark:3.5.0
+
+USER root
+
+RUN pip install --no-cache-dir pyyaml
+
+# ---- GCS CONNECTOR (SHADED) ----
+ADD https://repo1.maven.org/maven2/com/google/cloud/bigdataoss/gcs-connector/hadoop3-2.2.21/gcs-connector-hadoop3-2.2.21-shaded.jar \
+    /opt/spark/jars/gcs-connector.jar
+
+# ✅ FIX PERMISSIONS (THIS IS THE KEY)
+RUN chown spark:spark /opt/spark/jars/gcs-connector.jar && \
+    chmod 644 /opt/spark/jars/gcs-connector.jar
+
+WORKDIR /app
+
+COPY spark /app/spark
+COPY config /app/config
+
+RUN chmod +x /app/spark/run_job.sh
+RUN mkdir -p /tmp/metastore_db /tmp/spark-warehouse && chmod -R 777 /tmp
+
+USER spark
+
+CMD ["/app/spark/run_job.sh"]

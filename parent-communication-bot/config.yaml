@@ -1,0 +1,8 @@
+whatsapp:
+  provider: twilio
+  account_sid: "YOUR_TWILIO_ACCOUNT_SID"
+  auth_token: "YOUR_TWILIO_AUTH_TOKEN"
+  from_number: "whatsapp:+14155238886"
+
+schedule:
+  weekly_summary_cron: "0 18 * * 5"  # Fridays at 18:00

@@ -111,15 +111,38 @@ def validate_twilio_request(url: str, params: Dict[str, str], signature: str) ->
     return request_validator.validate(url, params, signature)
 
 
+def normalize_whatsapp_number(number: str) -> str:
+    if not number:
+        return ""
+    normalized = number.strip().lower()
+    if normalized.startswith("whatsapp:"):
+        normalized = normalized[len("whatsapp:") :]
+    return normalized.replace(" ", "").replace("-", "")
+
+
 def get_parent_contact(student_id: str) -> ParentContact | None:
     return next((parent for parent in SAMPLE_PARENTS if parent.student_id == student_id), None)
 
 
 def get_parent_contact_by_whatsapp(whatsapp_number: str) -> ParentContact | None:
-    if not whatsapp_number:
+    normalized = normalize_whatsapp_number(whatsapp_number)
+    if not normalized:
         return None
-    normalized = whatsapp_number.strip()
-    return next((parent for parent in SAMPLE_PARENTS if parent.whatsapp_number == normalized), None)
+    return next(
+        (
+            parent
+            for parent in SAMPLE_PARENTS
+            if normalize_whatsapp_number(parent.whatsapp_number) == normalized
+        ),
+        None,
+    )
+
+
+def log_parent_query(parent: ParentContact | None, incoming: str, response: str) -> None:
+    parent_info = parent.student_id if parent else "unknown"
+    print(
+        f"[ParentQuery] parent={parent_info} incoming={incoming!r} response={response!r}"
+    )
 
 
 def generate_weekly_summaries() -> List[Dict[str, str]]:
@@ -135,41 +158,58 @@ def generate_weekly_summaries() -> List[Dict[str, str]]:
 
 
 def answer_common_query(message: str) -> str:
-    text = message.lower()
+    text = (message or "").lower()
     if "attendance" in text:
-        return "Your child has excellent attendance this week. Please check the next summary for details."
+        return "Your child has excellent attendance this week. The latest summary includes full attendance details."
     if "homework" in text or "assignment" in text:
-        return "Homework completion is strong. We will send a full breakdown in the weekly report."
+        return "Homework completion is strong. I will share the full breakdown in the next weekly report."
     if "grade" in text or "marks" in text:
-        return "Grades are updated weekly. The latest summary includes all subjects and performance notes."
+        return "Grades are updated weekly. Review the latest summary for all subject notes and guidance."
     if "improve" in text or "better" in text:
-        return "We recommend consistent 15-minute daily practice and reviewing teacher feedback from class."
+        return "I recommend 15 minutes of daily review and checking teacher feedback in the latest summary."
+    if "behavior" in text or "conduct" in text or "discipline" in text:
+        return "Behavior and participation notes are included in the weekly report. Your child is making steady progress."
+    if "exam" in text or "test" in text or "schedule" in text:
+        return "Exam and test schedules are shared by the school. I can provide the latest performance summary once it is available."
     if "fee" in text or "payment" in text:
-        return "Fee and payment information is shared by school administration. Please contact the school office for the latest invoice details."
-    if "hello" in text or "hi" in text or "hey" in text:
-        return "Hello! I’m your school support assistant. Ask me about attendance, homework, grades, or request the latest summary."
+        return "Fee payment status is maintained by the school office. I can only share academic and attendance updates right now."
+    if "hello" in text or "hi" in text or "hey" in text or "good morning" in text:
+        return "Hello! I’m your school support bot. Ask me about attendance, homework, grades, behavior, or request the latest summary."
+    if "summary" in text or "report" in text or "latest report" in text:
+        return "Please ask for the latest summary by sending 'latest summary' or 'report' and I will share your child's most recent update."
+
     return (
-        "Thank you for your question. The weekly WhatsApp summary includes grades, attendance, homework status, "
-        "behavior notes, and next steps. If you need more detail, ask for the latest summary or contact school staff."
+        "I’m available 24/7 to support you. You can ask about attendance, homework, grades, behavior, or request the latest summary. "
+        "If you need a specific report, send a message like 'latest summary' or 'homework update'."
     )
 
 
 def process_incoming_whatsapp_message(from_number: str, body: str) -> str:
     parent = get_parent_contact_by_whatsapp(from_number)
-    if parent is None:
-        return (
-            "Thanks for contacting the school support bot. We could not find a registered parent account for this WhatsApp number. "
-            "Please confirm your registered phone number with the school."
-        )
+    normalized_body = (body or "").strip()
 
-    normalized_body = (body or "").strip().lower()
-    if any(keyword in normalized_body for keyword in ["summary", "report", "latest summary", "weekly report"]):
+    if parent is None:
+        response = (
+            "Thanks for contacting the school support bot. I could not find your registered parent profile. "
+            "Please confirm the number registered with the school and try again."
+        )
+        log_parent_query(None, normalized_body, response)
+        return response
+
+    lower_body = normalized_body.lower()
+    if any(keyword in lower_body for keyword in ["summary", "report", "latest summary", "weekly report"]):
         performance = next((item for item in SAMPLE_PERFORMANCES if item.student_id == parent.student_id), None)
         if performance:
-            return generate_summary(performance)
-        return "I could not find the latest report for your child. Please contact the school if this persists."
+            response = generate_summary(performance)
+            log_parent_query(parent, normalized_body, response)
+            return response
+        response = "I could not find the latest report for your child right now. Please try again later."
+        log_parent_query(parent, normalized_body, response)
+        return response
 
-    return answer_common_query(body)
+    response = answer_common_query(normalized_body)
+    log_parent_query(parent, normalized_body, response)
+    return response
 
 
 def get_sample_data() -> Dict[str, List[Dict[str, str]]]:

@@ -1,8 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 from twilio.twiml.messaging_response import MessagingResponse
 
 from bot import (
@@ -15,31 +12,12 @@ from bot import (
 )
 
 app = FastAPI(title="AI Parent Communication Bot")
-scheduler = BackgroundScheduler()
 
 
 class ParentQuery(BaseModel):
     parent_name: str
     student_id: str
     message: str
-
-
-@app.on_event("startup")
-def start_scheduler():
-    cron_expression = config["schedule"]["weekly_summary_cron"]
-    scheduler.add_job(
-        generate_weekly_summaries,
-        CronTrigger.from_crontab(cron_expression),
-        id="weekly_summary_job",
-        replace_existing=True,
-    )
-    scheduler.start()
-
-
-@app.on_event("shutdown")
-def shutdown_scheduler():
-    if scheduler.running:
-        scheduler.shutdown(wait=False)
 
 
 @app.get("/status")
@@ -68,18 +46,27 @@ def query(query: ParentQuery):
 
 @app.post("/incoming")
 async def incoming_whatsapp(request: Request):
-    form = await request.form()
-    sender = form.get("From")
-    body = form.get("Body", "")
-    signature = request.headers.get("X-Twilio-Signature", "")
+    print(f"[INCOMING REQUEST] method={request.method} url={request.url}")
+    try:
+        form = await request.form()
+        print(f"[FORM PARSED] {dict(form)}")
+        sender = form.get("From")
+        body = form.get("Body", "")
+        signature = request.headers.get("X-Twilio-Signature", "")
 
-    if not validate_twilio_request(str(request.url), dict(form), signature):
-        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+        if not validate_twilio_request(str(request.url), dict(form), signature):
+            raise HTTPException(status_code=403, detail="Invalid Twilio signature")
 
-    answer = process_incoming_whatsapp_message(sender, body)
-    response = MessagingResponse()
-    response.message(answer)
-    return Response(str(response), media_type="application/xml")
+        answer = process_incoming_whatsapp_message(sender, body)
+        response = MessagingResponse()
+        response.message(answer)
+        return Response(str(response), media_type="application/xml")
+    except Exception as exc:
+        import traceback
+
+        print("[incoming webhook error]", exc)
+        print(traceback.format_exc())
+        raise
 
 
 @app.get("/sample-data")

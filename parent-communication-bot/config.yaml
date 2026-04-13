@@ -7,3 +7,10 @@ whatsapp:
 
 schedule:
   weekly_summary_cron: "0 18 * * 5"  # Fridays at 18:00
+
+
+
+bigquery:
+  project_id: "project-979ca20d-e39c-4669-ada"
+  dataset: "school_bot_dev"
+

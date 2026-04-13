@@ -1,110 +1,78 @@
+
+# -----------------------
+# In‑memory session store
+# -----------------------
+parent_sessions = {}
+
 from datetime import date
 from typing import Dict, List
-import yaml
 import os
+import yaml
 from dotenv import load_dotenv
+
 from twilio.rest import Client
 from twilio.request_validator import RequestValidator
-
 from pydantic import BaseModel
+from google.cloud import bigquery
 
-# Load environment variables
+# ------------------------------------------------------------------
+# Load config
+# ------------------------------------------------------------------
+
 load_dotenv()
 
-# Load configuration
-with open('config.yaml', 'r') as f:
+with open("config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
-# Override with environment variables for security
-config['whatsapp']['account_sid'] = os.getenv('TWILIO_ACCOUNT_SID', config['whatsapp']['account_sid'])
-config['whatsapp']['auth_token'] = os.getenv('TWILIO_AUTH_TOKEN', config['whatsapp']['auth_token'])
-config['whatsapp']['from_number'] = os.getenv('TWILIO_FROM_NUMBER', config['whatsapp']['from_number'])
-config['whatsapp']['validate_requests'] = os.getenv(
-    'TWILIO_VALIDATE_REQUESTS',
-    str(config['whatsapp'].get('validate_requests', False))
-).lower() in {'1', 'true', 'yes'}
+config["whatsapp"]["account_sid"] = os.getenv(
+    "TWILIO_ACCOUNT_SID", config["whatsapp"]["account_sid"]
+)
+config["whatsapp"]["auth_token"] = os.getenv(
+    "TWILIO_AUTH_TOKEN", config["whatsapp"]["auth_token"]
+)
+config["whatsapp"]["from_number"] = os.getenv(
+    "TWILIO_FROM_NUMBER", config["whatsapp"]["from_number"]
+)
+config["whatsapp"]["validate_requests"] = os.getenv(
+    "TWILIO_VALIDATE_REQUESTS",
+    str(config["whatsapp"].get("validate_requests", False)),
+).lower() in {"1", "true", "yes"}
 
-# Initialize Twilio client
-twilio_client = Client(config['whatsapp']['account_sid'], config['whatsapp']['auth_token'])
-request_validator = RequestValidator(config['whatsapp']['auth_token'])
+# ------------------------------------------------------------------
+# Twilio
+# ------------------------------------------------------------------
 
+twilio_client = Client(
+    config["whatsapp"]["account_sid"], config["whatsapp"]["auth_token"]
+)
+request_validator = RequestValidator(config["whatsapp"]["auth_token"])
 
-class StudentPerformance(BaseModel):
-    student_id: str
-    student_name: str
-    grade: str
-    attendance: float
-    homework_completion: float
-    behavior: str
-    highlights: List[str]
+# ------------------------------------------------------------------
+# BigQuery
+# ------------------------------------------------------------------
 
+bq_client = bigquery.Client(project=config["bigquery"]["project_id"])
+BQ_DATASET = f'{config["bigquery"]["project_id"]}.{config["bigquery"]["dataset"]}'
+
+# ------------------------------------------------------------------
+# Models
+# ------------------------------------------------------------------
 
 class ParentContact(BaseModel):
+    parent_id: str
     parent_name: str
     whatsapp_number: str
     student_id: str
+    student_name: str
+    grade: str
+    section: str
 
-
-SAMPLE_PERFORMANCES = [
-    StudentPerformance(
-        student_id="STU001",
-        student_name="Aanya Sharma",
-        grade="A-",
-        attendance=98.0,
-        homework_completion=92.0,
-        behavior="Excellent participation in class",
-        highlights=[
-            "Math quiz score: 93%",
-            "Science project completed on time",
-            "Asked insightful questions in English class",
-        ],
-    ),
-    StudentPerformance(
-        student_id="STU002",
-        student_name="Imran Khan",
-        grade="B+",
-        attendance=95.0,
-        homework_completion=88.0,
-        behavior="Shows consistent effort",
-        highlights=[
-            "Improved reading fluency",
-            "Strong teamwork during the social studies activity",
-        ],
-    ),
-]
-
-SAMPLE_PARENTS = [
-    ParentContact(parent_name="Mrs. Sharma", whatsapp_number="whatsapp:+917200374549", student_id="STU001"),
-    ParentContact(parent_name="Mr. Khan", whatsapp_number="whatsapp:+919123456789", student_id="STU002"),
-]
-
-
-def generate_summary(performance: StudentPerformance) -> str:
-    return (
-        f"Weekly Performance Summary for {performance.student_name} ({performance.student_id}):\n"
-        f"Grade: {performance.grade}\n"
-        f"Attendance: {performance.attendance}%\n"
-        f"Homework completion: {performance.homework_completion}%\n"
-        f"Behavior: {performance.behavior}\n"
-        "Highlights:\n"
-        + "\n".join(f"- {item}" for item in performance.highlights)
-    )
-
-
-def send_whatsapp_message(to_number: str, message: str) -> None:
-    try:
-        message = twilio_client.messages.create(
-            body=message,
-            from_=config['whatsapp']['from_number'],
-            to=to_number,
-        )
-        print(f"WhatsApp message sent successfully. SID: {message.sid}")
-    except Exception as e:
-        print(f"Failed to send WhatsApp message to {to_number}: {str(e)}")
-
+# ------------------------------------------------------------------
+# Utilities
+# ------------------------------------------------------------------
 
 def validate_twilio_request(url: str, params: Dict[str, str], signature: str) -> bool:
-    if not config['whatsapp']['validate_requests']:
+    if not config["whatsapp"]["validate_requests"]:
         return True
     if not signature:
         return False
@@ -114,107 +82,277 @@ def validate_twilio_request(url: str, params: Dict[str, str], signature: str) ->
 def normalize_whatsapp_number(number: str) -> str:
     if not number:
         return ""
-    normalized = number.strip().lower()
+    normalized = number.lower().strip()
     if normalized.startswith("whatsapp:"):
         normalized = normalized[len("whatsapp:") :]
     return normalized.replace(" ", "").replace("-", "")
 
+# ------------------------------------------------------------------
+# Parent & children resolution (MULTI‑CHILD)
+# ------------------------------------------------------------------
 
-def get_parent_contact(student_id: str) -> ParentContact | None:
-    return next((parent for parent in SAMPLE_PARENTS if parent.student_id == student_id), None)
-
-
-def get_parent_contact_by_whatsapp(whatsapp_number: str) -> ParentContact | None:
+def get_children_for_parent(whatsapp_number: str) -> List[ParentContact]:
     normalized = normalize_whatsapp_number(whatsapp_number)
-    if not normalized:
-        return None
-    return next(
-        (
-            parent
-            for parent in SAMPLE_PARENTS
-            if normalize_whatsapp_number(parent.whatsapp_number) == normalized
-        ),
-        None,
+
+    query = f"""
+    SELECT
+      p.parent_id,
+      p.parent_name,
+      p.phone_number AS whatsapp_number,
+      s.student_id,
+      s.student_name,
+      s.grade,
+      s.section
+    FROM `{BQ_DATASET}.parents` p
+    JOIN `{BQ_DATASET}.student_parent_map` spm
+      ON p.parent_id = spm.parent_id
+    JOIN `{BQ_DATASET}.students` s
+      ON spm.student_id = s.student_id
+    WHERE p.phone_number = @phone
+      AND p.is_active = TRUE
+      AND s.is_active = TRUE
+    """
+
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("phone", "STRING", normalized)
+        ]
     )
 
+    rows = list(bq_client.query(query, job_config=job_config))
+    return [ParentContact(**row) for row in rows]
 
-def log_parent_query(parent: ParentContact | None, incoming: str, response: str) -> None:
-    parent_info = parent.student_id if parent else "unknown"
-    print(
-        f"[ParentQuery] parent={parent_info} incoming={incoming!r} response={response!r}"
+
+def prompt_child_selection(children: List[ParentContact]) -> str:
+    lines = ["You have multiple children registered:\n"]
+    for i, c in enumerate(children, start=1):
+        lines.append(f"{i}️⃣ {c.student_name} ({c.grade}-{c.section})")
+    lines.append("\nReply with the number to continue.")
+    return "\n".join(lines)
+
+# ------------------------------------------------------------------
+# Attendance
+# ------------------------------------------------------------------
+
+def get_weekly_attendance(student_id: str) -> float:
+    query = f"""
+    SELECT
+      COUNTIF(status = 'Present') * 100.0 / COUNT(*) AS attendance_pct
+    FROM `{BQ_DATASET}.attendance_daily`
+    WHERE student_id = @student_id
+      AND attendance_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+    """
+
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("student_id", "STRING", student_id)
+        ]
     )
 
+    rows = list(bq_client.query(query, job_config=job_config))
+    pct = rows[0].attendance_pct if rows else None
+    return round(pct, 2) if pct is not None else 0.0
+
+
+def generate_attendance_summary(parent: ParentContact) -> str:
+    attendance = get_weekly_attendance(parent.student_id)
+    return (
+        "📊 Weekly Attendance Summary\n\n"
+        f"Student: {parent.student_name}\n"
+        f"Class: {parent.grade}-{parent.section}\n"
+        f"Attendance: {attendance}%\n\n"
+        "Thank you for supporting your child’s learning."
+    )
+
+# ------------------------------------------------------------------
+# Homework
+# ------------------------------------------------------------------
+
+def get_today_homework(student_id: str) -> str:
+    query = f"""
+    SELECT subject, status
+    FROM `{BQ_DATASET}.homework_daily`
+    WHERE student_id = @student_id
+      AND homework_date = CURRENT_DATE()
+    """
+
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("student_id", "STRING", student_id)
+        ]
+    )
+
+    rows = list(bq_client.query(query, job_config=job_config))
+    if not rows:
+        return "📘 No homework assigned for today."
+
+    lines = ["📘 Today's Homework:"]
+    for r in rows:
+        lines.append(f"- {r.subject}: {r.status}")
+    return "\n".join(lines)
+
+# ------------------------------------------------------------------
+# Grades
+# ------------------------------------------------------------------
+
+def get_recent_grades(student_id: str) -> str:
+    query = f"""
+    SELECT subject, score, max_score
+    FROM `{BQ_DATASET}.grades_summary`
+    WHERE student_id = @student_id
+    ORDER BY graded_on DESC
+    """
+
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("student_id", "STRING", student_id)
+        ]
+    )
+
+    rows = list(bq_client.query(query, job_config=job_config))
+    if not rows:
+        return "📊 No grades available yet."
+
+    lines = ["📊 Recent Grades:"]
+    for r in rows:
+        lines.append(f"- {r.subject}: {r.score}/{r.max_score}")
+    return "\n".join(lines)
+
+# ------------------------------------------------------------------
+# MAIN BOT LOGIC (ALL FEATURES)
+# ------------------------------------------------------------------
+
+def process_incoming_whatsapp_message(from_number: str, body: str) -> str:
+    incoming = (body or "").strip().lower()
+
+    # ✅ 1. Handle greetings FIRST (always respond)
+    if incoming in {"hi", "hello", "hey", "good morning", "good evening"}:
+        return (
+            "Hello! 👋 I can help you with:\n\n"
+            "• Attendance\n"
+            "• Homework\n"
+            "• Grades\n"
+            "• Weekly Summary\n\n"
+            "You can also type 'switch child' to change the selected student."
+        )
+
+    # ✅ 2. Resolve children
+    children = get_children_for_parent(from_number)
+    if not children:
+        return (
+            "We could not find your registration details. "
+            "Please contact the school office."
+        )
+
+    session = parent_sessions.get(from_number)
+
+    # ✅ 3. Handle child selection if multiple children
+    if incoming.isdigit() and len(children) > 1:
+        idx = int(incoming) - 1
+        if 0 <= idx < len(children):
+            parent_sessions[from_number] = children[idx]
+            selected = children[idx]
+            return (
+                f"✅ Selected child: {selected.student_name} "
+                f"({selected.grade}-{selected.section})\n\n"
+                "How can I help you?\n"
+                "• Attendance\n"
+                "• Homework\n"
+                "• Grades\n"
+                "• Weekly Summary"
+            )
+        else:
+            return "❌ Invalid selection. Please reply with a valid number."
+
+    # ✅ 4. Ask for child selection if needed
+    if len(children) > 1 and session is None:
+        return prompt_child_selection(children)
+
+    # ✅ 5. Resolve selected child
+    selected = session if session else children[0]
+
+    # ✅ 6. Intent routing
+    if "attendance" in incoming:
+        return generate_attendance_summary(selected)
+
+    if "homework" in incoming:
+        return get_today_homework(selected.student_id)
+
+    if "grades" in incoming:
+        return get_recent_grades(selected.student_id)
+
+    if "summary" in incoming:
+        return (
+            generate_attendance_summary(selected)
+            + "\n\n"
+            + get_today_homework(selected.student_id)
+        )
+
+    if "switch" in incoming or "change" in incoming:
+        parent_sessions.pop(from_number, None)
+        return prompt_child_selection(children)
+
+    # ✅ 7. Final fallback (always respond)
+    return (
+        "I can help you with:\n\n"
+        "• Attendance\n"
+        "• Homework\n"
+        "• Grades\n"
+        "• Weekly Summary\n\n"
+        "Type 'switch child' to change the selected student."
+    )
+
+# ------------------------------------------------------------------
+# Scheduled weekly summaries
+# ------------------------------------------------------------------
 
 def generate_weekly_summaries() -> List[Dict[str, str]]:
     payload = []
-    for performance in SAMPLE_PERFORMANCES:
-        contact = get_parent_contact(performance.student_id)
-        if contact is None:
-            continue
-        summary = generate_summary(performance)
-        send_whatsapp_message(contact.whatsapp_number, summary)
-        payload.append({"parent": contact.parent_name, "student": performance.student_name, "status": "sent"})
+
+    query = f"""
+    SELECT DISTINCT
+      p.phone_number,
+      p.parent_name,
+      s.student_name,
+      s.student_id,
+      s.grade,
+      s.section
+    FROM `{BQ_DATASET}.parents` p
+    JOIN `{BQ_DATASET}.student_parent_map` spm
+      ON p.parent_id = spm.parent_id
+    JOIN `{BQ_DATASET}.students` s
+      ON spm.student_id = s.student_id
+    WHERE p.is_active = TRUE
+      AND s.is_active = TRUE
+    """
+
+    for row in bq_client.query(query):
+        parent = ParentContact(**row)
+        message = generate_attendance_summary(parent)
+        twilio_client.messages.create(
+            body=message,
+            from_=config["whatsapp"]["from_number"],
+            to=f"whatsapp:{parent.whatsapp_number}",
+        )
+        payload.append(
+            {
+                "parent": parent.parent_name,
+                "student": parent.student_name,
+                "status": "sent",
+            }
+        )
+
     return payload
 
 
 def answer_common_query(message: str) -> str:
-    text = (message or "").lower()
-    if "attendance" in text:
-        return "Your child has excellent attendance this week. The latest summary includes full attendance details."
-    if "homework" in text or "assignment" in text:
-        return "Homework completion is strong. I will share the full breakdown in the next weekly report."
-    if "grade" in text or "marks" in text:
-        return "Grades are updated weekly. Review the latest summary for all subject notes and guidance."
-    if "improve" in text or "better" in text:
-        return "I recommend 15 minutes of daily review and checking teacher feedback in the latest summary."
-    if "behavior" in text or "conduct" in text or "discipline" in text:
-        return "Behavior and participation notes are included in the weekly report. Your child is making steady progress."
-    if "exam" in text or "test" in text or "schedule" in text:
-        return "Exam and test schedules are shared by the school. I can provide the latest performance summary once it is available."
-    if "fee" in text or "payment" in text:
-        return "Fee payment status is maintained by the school office. I can only share academic and attendance updates right now."
-    if "hello" in text or "hi" in text or "hey" in text or "good morning" in text:
-        return "Hello! I’m your school support bot. Ask me about attendance, homework, grades, behavior, or request the latest summary."
-    if "summary" in text or "report" in text or "latest report" in text:
-        return "Please ask for the latest summary by sending 'latest summary' or 'report' and I will share your child's most recent update."
-
     return (
-        "I’m available 24/7 to support you. You can ask about attendance, homework, grades, behavior, or request the latest summary. "
-        "If you need a specific report, send a message like 'latest summary' or 'homework update'."
+        "You can ask me about attendance, homework, grades or weekly summary."
     )
 
 
-def process_incoming_whatsapp_message(from_number: str, body: str) -> str:
-    parent = get_parent_contact_by_whatsapp(from_number)
-    normalized_body = (body or "").strip()
-
-    if parent is None:
-        response = (
-            "Thanks for contacting the school support bot. I could not find your registered parent profile. "
-            "Please confirm the number registered with the school and try again."
-        )
-        log_parent_query(None, normalized_body, response)
-        return response
-
-    lower_body = normalized_body.lower()
-    if any(keyword in lower_body for keyword in ["summary", "report", "latest summary", "weekly report"]):
-        performance = next((item for item in SAMPLE_PERFORMANCES if item.student_id == parent.student_id), None)
-        if performance:
-            response = generate_summary(performance)
-            log_parent_query(parent, normalized_body, response)
-            return response
-        response = "I could not find the latest report for your child right now. Please try again later."
-        log_parent_query(parent, normalized_body, response)
-        return response
-
-    response = answer_common_query(normalized_body)
-    log_parent_query(parent, normalized_body, response)
-    return response
-
-
-def get_sample_data() -> Dict[str, List[Dict[str, str]]]:
+def get_sample_data() -> Dict[str, str]:
     return {
-        "students": [performance.model_dump() for performance in SAMPLE_PERFORMANCES],
-        "parents": [parent.model_dump() for parent in SAMPLE_PARENTS],
+        "message": "Sample endpoint disabled. Data is now sourced from BigQuery.",
         "generated_on": str(date.today()),
     }

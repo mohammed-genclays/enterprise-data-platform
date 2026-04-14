@@ -1,70 +1,284 @@
-# AI Parent Communication Bot
 
-## Problem
-Parents receive scattered, chaotic updates through WhatsApp groups. Individual student performance updates are missing and staff spend too much time responding to routine questions.
+# 🤖 AI Parent Communication Bot
 
-## Solution
-AI Parent Communication Bot automatically:
-- sends personalized weekly performance summaries to each parent via WhatsApp
-- answers common parent queries 24/7
-- reduces manual staff effort and improves parent engagement
+## 📘 Problem Statement
+Parents receive scattered and chaotic updates through WhatsApp groups. Individual student performance insights are missing, and school staff spend a significant amount of time answering repetitive questions such as attendance, homework, and marks.
 
-## Project Structure
-- `app.py`: FastAPI service with endpoints for sending summaries and receiving parent queries
-- `bot.py`: summary generation, communication helpers, and simple AI query handling
-- `config.yaml`: configuration for WhatsApp integration and schedule settings
-- `.env.example`: example environment variables for secure credential storage
-- `requirements.txt`: Python dependencies
+---
 
-## Setup WhatsApp Integration (Twilio)
-1. Sign up for a [Twilio account](https://www.twilio.com/).
-2. Enable WhatsApp in your Twilio console and get a WhatsApp-enabled phone number.
-3. Copy `.env.example` to `.env` and fill in your Twilio credentials:
-   ```bash
-   TWILIO_ACCOUNT_SID=your_account_sid
-   TWILIO_AUTH_TOKEN=your_auth_token
-   TWILIO_FROM_NUMBER=whatsapp:+your_twilio_whatsapp_number
-   TWILIO_WEBHOOK_URL=https://your-domain.com/incoming
-   TWILIO_VALIDATE_REQUESTS=false
-   ```
-4. Update `config.yaml` if you want to change the weekly summary cron schedule.
-5. In the Twilio sandbox or WhatsApp sender setup, configure the incoming webhook URL to:
-   ```text
-   https://your-domain.com/incoming
-   ```
-   Replace `https://your-domain.com` with your actual public app URL.
+## ✅ Solution
+AI Parent Communication Bot is a conversational assistant for schools that:
 
-## Run locally
-1. Create a virtual environment:
-   ```bash
-   python -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-   ```
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Start the app:
-   ```bash
-   uvicorn app:app --reload --port 8000
-   ```
-4. Expose the app for Twilio webhook testing (optional):
-   - Use a tunnel like ngrok:
-     ```bash
-     ngrok http 8000
-     ```
-   - Point Twilio webhook to `https://<ngrok-id>.ngrok-free.app/incoming`
-5. Send summaries manually:
-   ```bash
-   curl -X POST http://localhost:8000/send-summaries
-   ```
+- Provides **personalized, student‑specific insights** to parents
+- Answers parent queries **24×7** via chat
+- Generates **AI‑based performance summaries and improvement plans**
+- Supports **parents with multiple children**
+- Significantly **reduces teacher and admin workload**
 
-## Real-time 24/7 support
-- Incoming WhatsApp messages are handled at `/incoming`.
-- The bot replies automatically with answers to attendance, homework, grades, improvement tips, and summary requests.
-- Automatic weekly summaries are scheduled using the cron expression in `config.yaml`.
+The system combines **structured school data** with an **AI explanation layer** (AI never writes or alters school data).
 
-## Notes
-- For production, keep credentials in environment variables and never commit `.env`.
-- The bot still uses sample student data; the next step is to connect your real student/parent datastore.
-- Use `TWILIO_VALIDATE_REQUESTS=true` in production after you deploy to a secure public URL.
+---
+
+## 🧠 Key Features
+
+- ✅ Multi‑child parent support
+- ✅ Natural language questions (no commands needed)
+- ✅ AI performance summaries
+- ✅ AI improvement plans (context‑aware follow‑up questions)
+- ✅ Asynchronous messaging (no WhatsApp timeouts)
+- ✅ BigQuery as source of truth
+- ✅ Local AI using **Ollama + LLaMA‑3** (development & pilot)
+
+---
+
+## 🗂 Project Structure
+
+```
+parent-communication-bot/
+│
+├── app.py                  # FastAPI webhook (Twilio entry point)
+├── bot.py                  # Core bot logic + async AI handling
+├── ai_service.py           # LLM interface (Ollama for local use)
+├── ai_intent.py            # AI intent detection logic
+├── ai_summary.py           # AI prompts for summaries & improvement plans
+│
+├── config.yaml             # WhatsApp + BigQuery configuration
+├── .env.example            # Environment variable template
+├── requirements.txt        # Python dependencies
+└── README.md               # Documentation
+```
+
+---
+
+## 🧩 System Architecture (Local Development)
+
+```
+Parent (WhatsApp)
+        ↓
+      Twilio
+        ↓
+FastAPI /incoming endpoint
+        ↓
+Immediate response (≤10 seconds)
+        ↓
+Async background AI task
+        ↓
+Ollama (LLaMA‑3)
+        ↓
+Split response → WhatsApp
+```
+
+✅ Designed to avoid Twilio timeouts  
+✅ Matches production WhatsApp patterns
+
+---
+
+## 🔧 Prerequisites
+
+- Python **3.10+**
+- Git
+- Twilio account (WhatsApp Sandbox for development)
+- Google Cloud BigQuery access
+- Local system with **16 GB RAM minimum** (32 GB recommended for Ollama)
+
+---
+
+## 🧠 Local AI Setup – Ollama
+
+### 1️⃣ Install Ollama
+
+Download from:
+https://ollama.com
+
+Verify installation:
+```
+ollama --version
+```
+
+---
+
+### 2️⃣ Pull LLaMA‑3 model
+
+```
+ollama pull llama3:8b
+```
+
+---
+
+### 3️⃣ Warm up the model (important)
+
+```
+ollama run llama3:8b
+```
+Type:
+```
+hello
+```
+Wait for response → press **Ctrl+C**
+
+✅ Prevents slow first response from the bot
+
+---
+
+## 🔐 Environment Variables
+
+Copy example file:
+```
+cp .env.example .env
+```
+
+Update `.env`:
+```
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxx
+TWILIO_FROM_NUMBER=whatsapp:+14155238886
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+```
+
+⚠️ Never commit `.env` to version control
+
+---
+
+## ⚙️ Configuration
+
+Edit `config.yaml`:
+
+```
+whatsapp:
+  from_number: "whatsapp:+14155238886"
+  validate_requests: false
+
+bigquery:
+  project_id: "your-gcp-project"
+  dataset: "school_bot_dev"
+```
+
+---
+
+## 🚀 Run Locally
+
+### 1️⃣ Create virtual environment
+
+```
+python -m venv .venv
+source .venv/bin/activate      # Linux / Mac
+.\.venv\Scripts\Activate.ps1  # Windows
+```
+
+---
+
+### 2️⃣ Install dependencies
+
+```
+pip install -r requirements.txt
+```
+
+---
+
+### 3️⃣ Start the FastAPI app
+
+```
+C:\Users\Rafeeq\Documents\git_repo\enterprise-data-platform\.venv\Scripts\python.exe -m uvicorn app:app --reload --port 8000
+```
+
+Test:
+```
+http://localhost:8000/status
+```
+
+---
+
+### 4️⃣ Expose webhook for Twilio testing
+
+```
+ngrok http 8000
+```
+
+Set Twilio webhook:
+```
+https://<ngrok-id>.ngrok-free.app/incoming
+```
+
+---
+
+## 💬 Bot Usage Examples
+
+```
+hi
+→ Select child
+
+How is my child doing?
+→ AI summary (async)
+
+Suggest improvement plan
+→ AI improvement steps (async)
+
+Attendance this week
+→ 66.7%
+
+Math marks
+→ 38 / 50
+```
+
+---
+
+## ⏱ Async Messaging Design
+
+- Webhook responds immediately to Twilio
+- AI responses are generated asynchronously
+- Long responses are split into multiple WhatsApp messages
+
+✅ No webhook timeouts  
+✅ Stable production pattern
+
+---
+
+## ⚠️ Twilio Sandbox Limitations
+
+- Strict daily message limits
+- Intended only for testing
+- Long AI usage will exceed quota quickly
+
+✅ Use sandbox **only for development**  
+✅ Production requires **WhatsApp Business API**
+
+---
+
+## 🧪 Data Assumptions
+
+The bot reads from BigQuery tables:
+- `parents`
+- `students`
+- `student_parent_map`
+- `attendance_daily`
+- `homework_daily`
+- `grades_summary`
+
+Teachers do not interact with the bot directly.
+
+---
+
+## 🔒 Security Notes
+
+- Enable request validation in production
+- Always use HTTPS
+- AI never modifies student data
+- AI output is explainable and supportive
+
+---
+
+## ✅ Current Status
+
+- ✅ Bot logic complete
+- ✅ AI summaries and follow-ups working
+- ✅ Async WhatsApp pattern stable
+- ✅ Ready for real-world deployment
+
+---
+
+## 🚀 Next Steps
+
+- Deploy to GCP VM (always-on)
+- Move from Twilio Sandbox → WhatsApp Business API
+- Add monitoring and logs
+- Pilot with 1–2 classes
